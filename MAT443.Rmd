@@ -1,0 +1,307 @@
+---
+title: "MAT443"
+author: "Feng Ji"
+date: "December 10, 2016"
+output: pdf_document
+---
+```{r setup}
+library(MASS)
+head(train_mid)
+library(ISLR)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(dplyr)
+library(gbm)
+library(e1071)
+```
+
+
+
+
+```{r}
+####ridge####
+
+data(Boston)
+x<-model.matrix(nature~.,data=train_mid)[,-1] 
+y<-train_mid$nature
+
+#Creat X and Y for testing
+x.test<-model.matrix(nature~.,data=test_mid)[,-1] 
+y.test<-test_mid$nature
+
+###ridge regression
+
+
+ridge.predictor=predict(ridge.train,1,newx=x.test) 
+
+ridge.predictor=ifelse(ridge.predictor>.5,1,0) 
+
+table1 <- table(ridge.predictor, y.test)
+table1
+
+#Misclassification
+1-sum(diag(table1))/sum(table1)
+
+
+#FP
+ridge.FP <- (1)/(73+1)
+
+
+#FN
+ridge.FN <- 494/(7500+494)
+
+
+#sensitivity 
+ridge.sens <- 73/(494+73)
+
+#specificity
+ridge.spec <- 7500/(7500+1)
+
+
+
+
+```
+
+
+```{r}
+###LASSO
+lasso.fit<-glmnet(x,y,alpha=1)  #standardizes variables
+
+lasso.predictor=predict(lasso.train,0,newx=x.test) 
+ 
+lasso.predictor=ifelse(lasso.predictor>.5,1,0) 
+
+
+table2 <- table(lasso.predictor, y.test)
+
+#Misclassification
+1-sum(diag(table2))/sum(table2)
+
+#FP
+lasso.FP <- (16)/(16+432)
+
+
+#FN
+lasso.FN <- 135/(7485+135)
+
+
+#sensitivity 
+ridge.sens <- 432/(135+432)
+
+
+#specificity
+ridge.spec <- 7485/(7485+16)
+
+
+
+
+```
+
+
+```{r}
+#################################################logistic###################################
+fit.log=glm(nature~. ,data=train_mid, family=binomial)
+log.predictor=predict(fit.log, test_mid,type ="response")
+log.pre=rep(0,8068)
+log.pre[log.predictor >.5]=1
+
+
+table3 <- table(log.pre, y.test)
+
+#Misclassification
+log.mis <- 1-sum(diag(table3))/sum(table3)
+log.mis
+```
+
+
+```{r 3, Random Forest}
+rf.fit<-randomForest(nature~.,data=train_mid,importance=TRUE)
+pred.rf <- predict(rf.fit,Testx,type="class");
+rf.predcat=ifelse(pred.rf>.5,1,0) 
+
+rf.table <- table(rf.predcat, Testy)
+rf.table
+
+#Misclassification
+rf.mis <- 1-sum(diag(rf.table))/sum(rf.table)
+rf.mis
+
+#FP
+rf.FP <- (3)/(3+535)
+
+
+#FN
+rf.FN <- 32/(7498+32)
+
+
+#sensitivity 
+rf.sens <- 535/(535+32)
+
+
+#specificity
+rf.spec <- 7498/(7498+3)
+
+
+varImpPlot(rf.fit,type=2)
+varImp(rf.fit)
+rf.imp <- varImp(rf.fit)
+
+
+
+#select 10 largets
+str(rf.fit)
+rf.fit$importanceSD
+
+colnames(rf.imp)
+rf.imp[order(-rf.imp$Overall),] 
+
+
+str(rf.imp)
+rf.imp
+```
+
+
+
+```{r 4, Adaboost}
+boost.fit<-gbm(nature~.,data=train_mid,distribution = "bernoulli",n.trees=2000)
+summary(boost.fit)
+pred.boost <- predict(boost.fit,test_mid,type="response",n.trees=2000) 
+boost.predcat=ifelse(pred.boost>.5,1,0) 
+
+boost.table <- table(boost.predcat, Testy)
+boost.table
+#parameter tuning
+min.rate=1
+best.shrink=0
+best.depth=0
+for (j in 1:10) {
+	
+for ( i in  seq(from=0.01,to=1,0.1) ) {
+        print(i)
+
+	boost.fit.tune=gbm(nature~., data=train_mid, distribution="bernoulli", n.trees=2000, interaction.depth=j,shrinkage=i, verbose=F)
+	pred.adaboost=predict(boost.fit.tune,newdata=test_mid,n.tree=2000,type="response")
+	adaboost.pred=ifelse(pred.adaboost>0.5,1,0)
+	table(adaboost.pred,Testy) -> boost.table.cv
+	r<-(boost.table.cv[1,2]+boost.table.cv[2,1])/sum(boost.table.cv)
+        print(r)
+        if ( r < min.rate) {
+           min.rate<-r
+ 	   best.shrink<-i
+           best.depth<-j
+	}
+}
+}
+
+
+n          <- 200;
+n.trees    <- 100;
+shrinkage  <- 0.01;
+
+####prediction############
+gbmFit <- gbm(
+  formula           = nature~.,
+  distribution      = "bernoulli",
+  data              = train_mid,
+  n.trees           = n.trees,
+  interaction.depth = 2,
+  n.minobsinnode    = 2,
+  shrinkage         = shrinkage,
+  bag.fraction      = 0.5,
+  cv.folds          = 0,
+  # verbose         = FALSE
+  n.cores           = 1
+)
+
+exp.scale  <- predict.gbm(gbmFit, test_mid, n.trees = n.trees,type = 'response');  #$
+ada.resp   <- predict(gbmFit, test_mid, n.trees = n.trees);  #$
+ada.resp.2 <- plogis(2*predict(gbmFit, test_mid, n.trees = n.trees))  #$
+ada.error  <- -exp(-sim.df$y * sim.df$exp.scale);  #$
+
+aba.predcat=ifelse(ada.resp>1,1,0)   ###rounding it
+
+table(Testy,aba.predcat)
+
+
+
+
+aba.pred<-predict(boost.fit,newdata=test_mid,n.trees=500,type="response")
+gbm_predicted<-plogis(2*aba.pred)
+
+aba.predcat=ifelse(gbm_predicted>.5,1,0)   ###rounding it
+
+table(Testy,aba.predcat)
+
+
+
+
+
+
+
+
+
+
+
+###################################cross-validation########################
+boost.fit.cv<-gbm(nature~.,data=train_mid,distribution =  "bernoulli",n.trees=200, interaction.depth = 4,  cv.folds=10)
+summary(boost.fit.cv)
+
+####prediction############
+pred.spam<-predict(spam.boost,newdata=spam[-train,],n.trees=5000,type="response")
+
+spam.pred=ifelse(pred.spam>.5,1,0)   ###rounding it
+
+mean(spam.pred!=test.Y)
+table(test.Y,spam.pred)
+```
+
+
+
+```{r 5, comparison}
+
+```
+
+
+```{r 6, 10 features}
+
+```
+
+```{r 7, svm}
+#radial
+svm.fit.radial=svm(nature~., data=train_mid, kernel ="radial", cost =6, scale =FALSE)
+svm.radial.pred <- predict(svm.fit.radial,newdata=Testx)
+svm.radial.predcat <- ifelse(svm.radial.pred>.5,1,0)
+
+
+
+svm.radial.table <- table(svm.radial.predcat, Testy)
+
+#Misclassification
+svm.radial.mis <- 1-sum(diag(svm.radial.table))/sum(svm.radial.table)
+svm.radial.mis
+
+
+#sigmoid
+svm.fit.sigmoid=svm(nature~., data=train_mid, kernel ="sigmoid", cost =6, scale =FALSE)
+svm.sigmoid.pred <- predict(svm.fit.sigmoid,newdata=Testx)
+svm.sigmoid.predcat <- ifelse(svm.sigmoid.pred>.5,1,0)
+
+
+
+svm.sigmoid.table <- table(svm.sigmoid.predcat, Testy)
+
+#Misclassification
+svm.sigmoid.mis <- 1-sum(diag(svm.sigmoid.table))/sum(svm.sigmoid.table)
+svm.sigmoid.mis
+
+
+#sigmoid
+svm.fit=svm(nature~., data=train_mid,  scale =FALSE)
+svm.pred <- predict(svm.fit,newdata=Testx)
+svm.predcat <- ifelse(svm.pred>.5,1,0)
+svm.table <- table(svm.predcat, Testy)
+
+```
+
+
